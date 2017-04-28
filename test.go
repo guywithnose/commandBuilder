@@ -1,10 +1,11 @@
-package commandBuilder
+package runner
 
 import (
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -20,18 +21,20 @@ type TestCommand struct {
 	cmdBuilder      *Test
 	Dir             string
 	expectedCommand *ExpectedCommand
+	actualCommand   string
 }
 
 // ExpectedCommand represents a command that will be handled by a TestCommand
 type ExpectedCommand struct {
-	command string
-	output  []byte
-	path    string
-	error   error
+	commandRegex *regexp.Regexp
+	output       []byte
+	path         string
+	error        error
+	Closure      func(string)
 }
 
-// CreateCommand returns a TestCommand
-func (testBuilder *Test) CreateCommand(path string, command ...string) Command {
+// New returns a TestCommand
+func (testBuilder *Test) New(path string, command ...string) Command {
 	var expectedCommand *ExpectedCommand
 	commandString := strings.Join(command, " ")
 	if len(testBuilder.ExpectedCommands) == 0 {
@@ -40,29 +43,33 @@ func (testBuilder *Test) CreateCommand(path string, command ...string) Command {
 		expectedCommand = testBuilder.ExpectedCommands[0]
 		if expectedCommand.path != path {
 			testBuilder.Errors = append(testBuilder.Errors, fmt.Errorf("Path %s did not match expected path %s", path, expectedCommand.path))
-		} else if expectedCommand.command != commandString {
-			testBuilder.Errors = append(testBuilder.Errors, fmt.Errorf("Command '%s' did not match expected command '%s'", commandString, expectedCommand.command))
+		} else if !expectedCommand.commandRegex.MatchString(commandString) {
+			testBuilder.Errors = append(testBuilder.Errors, fmt.Errorf("Command '%s' did not match expected command '%s'", commandString, expectedCommand.commandRegex))
 		} else {
 			testBuilder.ExpectedCommands = testBuilder.ExpectedCommands[1:]
 		}
 	}
 
-	return TestCommand{cmdBuilder: testBuilder, Dir: path, expectedCommand: expectedCommand}
+	return TestCommand{cmdBuilder: testBuilder, Dir: path, expectedCommand: expectedCommand, actualCommand: commandString}
 }
 
 // Output returns the expected mock data
 func (cmd TestCommand) Output() ([]byte, error) {
-	if cmd.expectedCommand == nil {
-		return nil, nil
-	}
-
-	return cmd.expectedCommand.output, cmd.expectedCommand.error
+	return cmd.run()
 }
 
 // CombinedOutput returns the expected mock data
 func (cmd TestCommand) CombinedOutput() ([]byte, error) {
+	return cmd.run()
+}
+
+func (cmd TestCommand) run() ([]byte, error) {
 	if cmd.expectedCommand == nil {
 		return nil, nil
+	}
+
+	if cmd.expectedCommand.Closure != nil {
+		cmd.expectedCommand.Closure(cmd.actualCommand)
 	}
 
 	return cmd.expectedCommand.output, cmd.expectedCommand.error
@@ -70,7 +77,11 @@ func (cmd TestCommand) CombinedOutput() ([]byte, error) {
 
 // NewExpectedCommand returns a new ExpectedCommand
 func NewExpectedCommand(path, command, output string, exitCode int) *ExpectedCommand {
-	var err error
+	commandRegex, err := regexp.Compile(fmt.Sprintf("^%s$", command))
+	if err != nil {
+		panic(err)
+	}
+
 	if exitCode == -1 {
 		err = errors.New("Error running command")
 	} else if exitCode != 0 {
@@ -84,10 +95,10 @@ func NewExpectedCommand(path, command, output string, exitCode int) *ExpectedCom
 	}
 
 	return &ExpectedCommand{
-		command: command,
-		output:  []byte(output),
-		path:    path,
-		error:   err,
+		commandRegex: commandRegex,
+		output:       []byte(output),
+		path:         path,
+		error:        err,
 	}
 }
 
