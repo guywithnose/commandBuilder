@@ -26,6 +26,18 @@ func TestTestRunner(t *testing.T) {
 	t.Fatalf("Generated error was not an ExitError: %v", err)
 }
 
+func TestTestRunnerWithEnvironment(t *testing.T) {
+	cb := &runner.Test{ExpectedCommands: []*runner.ExpectedCommand{runner.NewExpectedCommand("", "ls", "error", 12).WithEnvironment([]string{"FOO=BAR"})}}
+	_, _ = cb.NewWithEnvironment("", []string{"FOO=BAR"}, "ls").Output()
+	assert.Equal(t, []error(nil), cb.Errors)
+}
+
+func TestTestRunnerWithEnvironmentError(t *testing.T) {
+	cb := &runner.Test{ExpectedCommands: []*runner.ExpectedCommand{runner.NewExpectedCommand("", "ls", "error", 12).WithEnvironment([]string{"FOO=NOTBAR"})}}
+	_, _ = cb.NewWithEnvironment("", []string{"FOO=BAR"}, "ls").Output()
+	assert.Equal(t, []error{errors.New("Environment [FOO=BAR] did not match expected environment [FOO=NOTBAR]")}, cb.Errors)
+}
+
 func TestTestRunnerUnexpectedCommandError(t *testing.T) {
 	cb := &runner.Test{}
 	command := cb.New("", "ls")
@@ -54,6 +66,10 @@ func TestTestRunnerRanCommandsAreRemoved(t *testing.T) {
 	cb := &runner.Test{ExpectedCommands: []*runner.ExpectedCommand{runner.NewExpectedCommand("", "ls", "error", 12)}}
 	_, _ = cb.New("", "ls").Output()
 	assert.Equal(t, []*runner.ExpectedCommand{}, cb.ExpectedCommands)
+}
+
+func TestTestRunnerImplementsBuilder(t *testing.T) {
+	var _ runner.Builder = (*runner.Test)(nil)
 }
 
 func TestNegativeOneError(t *testing.T) {

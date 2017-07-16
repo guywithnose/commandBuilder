@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,10 +27,12 @@ type TestCommand struct {
 
 // ExpectedCommand represents a command that will be handled by a TestCommand
 type ExpectedCommand struct {
+	command      string
 	commandRegex *regexp.Regexp
 	output       []byte
 	path         string
 	error        error
+	env          []string
 	Closure      func(string)
 }
 
@@ -41,16 +44,36 @@ func (testBuilder *Test) New(path string, command ...string) Command {
 		testBuilder.Errors = append(testBuilder.Errors, fmt.Errorf("More commands were run than expected.  Extra command: %s", commandString))
 	} else {
 		expectedCommand = testBuilder.ExpectedCommands[0]
-		if expectedCommand.path != path {
-			testBuilder.Errors = append(testBuilder.Errors, fmt.Errorf("Path %s did not match expected path %s", path, expectedCommand.path))
-		} else if !expectedCommand.commandRegex.MatchString(commandString) {
-			testBuilder.Errors = append(testBuilder.Errors, fmt.Errorf("Command '%s' did not match expected command '%s'", commandString, expectedCommand.commandRegex))
-		} else {
-			testBuilder.ExpectedCommands = testBuilder.ExpectedCommands[1:]
-		}
+		testBuilder.validateCommand(expectedCommand, commandString, path, nil, command...)
 	}
 
 	return TestCommand{cmdBuilder: testBuilder, Dir: path, expectedCommand: expectedCommand, actualCommand: commandString}
+}
+
+// NewWithEnvironment returns a TestCommand
+func (testBuilder *Test) NewWithEnvironment(path string, env []string, command ...string) Command {
+	var expectedCommand *ExpectedCommand
+	commandString := strings.Join(command, " ")
+	if len(testBuilder.ExpectedCommands) == 0 {
+		testBuilder.Errors = append(testBuilder.Errors, fmt.Errorf("More commands were run than expected.  Extra command: %s", commandString))
+	} else {
+		expectedCommand = testBuilder.ExpectedCommands[0]
+		testBuilder.validateCommand(expectedCommand, commandString, path, env, command...)
+	}
+
+	return TestCommand{cmdBuilder: testBuilder, Dir: path, expectedCommand: expectedCommand, actualCommand: commandString}
+}
+
+func (testBuilder *Test) validateCommand(expectedCommand *ExpectedCommand, commandString, path string, env []string, command ...string) {
+	if expectedCommand.path != path {
+		testBuilder.Errors = append(testBuilder.Errors, fmt.Errorf("Path %s did not match expected path %s", path, expectedCommand.path))
+	} else if !expectedCommand.commandRegex.MatchString(commandString) {
+		testBuilder.Errors = append(testBuilder.Errors, fmt.Errorf("Command '%s' did not match expected command '%s'", commandString, expectedCommand.command))
+	} else if !reflect.DeepEqual(expectedCommand.env, env) {
+		testBuilder.Errors = append(testBuilder.Errors, fmt.Errorf("Environment %v did not match expected environment %v", env, expectedCommand.env))
+	} else {
+		testBuilder.ExpectedCommands = testBuilder.ExpectedCommands[1:]
+	}
 }
 
 // Output returns the expected mock data
@@ -96,10 +119,17 @@ func NewExpectedCommand(path, command, output string, exitCode int) *ExpectedCom
 
 	return &ExpectedCommand{
 		commandRegex: commandRegex,
+		command:      command,
 		output:       []byte(output),
 		path:         path,
 		error:        err,
 	}
+}
+
+// WithEnvironment adds environment expectations to an ExpectedCommand
+func (ec *ExpectedCommand) WithEnvironment(env []string) *ExpectedCommand {
+	ec.env = env
+	return ec
 }
 
 // ErrorCodeHelper exits with a specified error code
